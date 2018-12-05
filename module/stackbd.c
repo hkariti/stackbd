@@ -59,10 +59,10 @@ static void stackbd_io_fn(struct bio *bio)
 //
 //    if (lba != EMPTY_REAL_LBA)
 //        bio->bi_sector = lba;
-    bio->bi_bdev = stackbd.bdev_raw;
+    bio->bi_disk = stackbd.bdev_raw->bd_disk;
 
-    trace_block_bio_remap(bdev_get_queue(stackbd.bdev_raw), bio,
-            bio->bi_bdev->bd_dev, bio->bi_sector);
+//    trace_block_bio_remap(bdev_get_queue(stackbd.bdev_raw), bio,
+//            bio->bi_bdev->bd_dev, bio->bi_sector);
 
     /* No need to call bio_endio() */
     generic_make_request(bio);
@@ -99,11 +99,11 @@ static int stackbd_threadfn(void *data)
 /*
  * Handle an I/O request.
  */
-static void stackbd_make_request(struct request_queue *q, struct bio *bio)
+static blk_qc_t stackbd_make_request(struct request_queue *q, struct bio *bio)
 {
-    printk("stackbd: make request %-5s block %-12llu #pages %-4hu total-size "
+    printk("stackbd: make request %-5s block %-12lu #pages %-4hu total-size "
             "%-10u\n", bio_data_dir(bio) == WRITE ? "write" : "read",
-            bio->bi_sector, bio->bi_vcnt, bio->bi_size);
+            bio->bi_iter.bi_sector, bio->bi_vcnt, bio->bi_iter.bi_size);
 
 //    printk("<%p> Make request %s %s %s\n", bio,
 //           bio->bi_rw & REQ_SYNC ? "SYNC" : "",
@@ -125,18 +125,19 @@ static void stackbd_make_request(struct request_queue *q, struct bio *bio)
     wake_up(&req_event);
     spin_unlock_irq(&stackbd.lock);
 
-    return;
+    return BLK_QC_T_NONE;
 
 abort:
     spin_unlock_irq(&stackbd.lock);
     printk("<%p> Abort request\n\n", bio);
     bio_io_error(bio);
+    return BLK_QC_T_NONE;
 }
 
 static struct block_device *stackbd_bdev_open(char dev_path[])
 {
     /* Open underlying device */
-    struct block_device *bdev_raw = lookup_bdev(dev_path);
+    struct block_device *bdev_raw = lookup_bdev(dev_path, 0);
     printk("Opened %s\n", dev_path);
 
     if (IS_ERR(bdev_raw))
@@ -170,7 +171,7 @@ static int stackbd_start(char dev_path[])
 
     /* Set up our internal device */
     stackbd.capacity = get_capacity(stackbd.bdev_raw->bd_disk);
-    printk("stackbd: Device real capacity: %llu\n", stackbd.capacity);
+    printk("stackbd: Device real capacity: %lu\n", stackbd.capacity);
 
     set_capacity(stackbd.gd, stackbd.capacity);
 
