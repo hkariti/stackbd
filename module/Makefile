@@ -1,4 +1,4 @@
-EXTRA_CFLAGS += -D_GNU_SOURCE 
+EXTRA_CFLAGS += -D_GNU_SOURCE
 obj-m := stackbd.o
 
 all:
