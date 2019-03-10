@@ -16,6 +16,7 @@
 #include <trace/events/block.h>
 
 #include "../common/stackbd.h"
+#include "trace_log.h"
 
 #define STACKBD_BDEV_MODE (FMODE_READ | FMODE_WRITE | FMODE_EXCL)
 #define DEBUGGG printk("stackbd: %d\n", __LINE__);
@@ -44,84 +45,15 @@ typedef struct _log_t {
   size_t count;
 } log_t;
 
-log_t* logs; // pointer to buffer of logs
-unsigned int log_read_head, log_write_head;
-unsigned int overruns; // number of times there was an entry that was overwritten
-unsigned int logging_enabled;
-
-static int log_entries_count(void) {
-  int diff = log_write_head - log_read_head;
-  if (diff < 0)
-    diff += LOG_ENTRIES_BUFFER_SIZE;
-  return diff;
-}
-
-static void log_increment_read_head(int count) {
-  log_read_head = (log_read_head + count) % LOG_ENTRIES_BUFFER_SIZE;
-}
-
-static void log_increment_write_head(void) {
-  log_write_head = (log_write_head + 1) % LOG_ENTRIES_BUFFER_SIZE;
-  // Check if we rolled over the read head, i.e. overrun
-  if (log_write_head == log_read_head) {
-    log_increment_read_head(1);
-    overruns++;
-    printk(KERN_WARNING "log overrun. total overruns is %d", overruns);
-  }
-}
-
 static void log_write(unsigned int pid, int write, long offset, unsigned int count) {
-  log_t* log_entry = logs + log_write_head;
-
-  *log_entry = (log_t){
+  log_t log_entry = {
     .pid = pid,
     .is_write = write,
     .offset = offset,
     .count = count
   };
-  log_increment_write_head();
+  log_write_entry(&log_entry);
 }
-
-static int logger_open(struct inode * in, struct file * fd) {
-  logging_enabled++;
-  printk(KERN_INFO "added reader, number is now %d", logging_enabled);
-  return 0;
-}
-
-static char* _logger_read(char *buffer, size_t count) {
-  copy_to_user(buffer, logs + log_read_head, count * sizeof(log_t));
-  log_increment_read_head(count);
-  return buffer + count*sizeof(log_t);
-}
-
-static ssize_t logger_read(struct file *fd, char *buffer, size_t count, loff_t *offset) {
-  size_t first_read_size, second_read_size;
-  size_t log_count = log_entries_count();
-  if (count > log_count)
-    count = log_count;
-  first_read_size = count;
-  second_read_size = 0;
-  if (log_read_head + count > LOG_ENTRIES_BUFFER_SIZE) {
-    first_read_size = LOG_ENTRIES_BUFFER_SIZE - log_read_head;
-    second_read_size = count - first_read_size;
-  }
-  buffer = _logger_read(buffer, first_read_size);
-  buffer = _logger_read(buffer, second_read_size);
-  return count;
-}
-
-static int logger_release(struct inode *in, struct file *fd) {
-  logging_enabled--;
-  printk(KERN_INFO "removed reader, number is now %d", logging_enabled);
-  return 0;
-}
-
-static struct file_operations my_trace_fops = {
-  .read = logger_read,
-  .open = logger_open,
-  .release = logger_release
-};
-
 
 
 /*
@@ -193,9 +125,9 @@ static int stackbd_threadfn(void *data)
  */
 static blk_qc_t stackbd_make_request(struct request_queue *q, struct bio *bio)
 {
-    printk("stackbd: make request %-5s block %-12lu #pages %-4hu total-size "
-            "%-10u\n", bio_data_dir(bio) == WRITE ? "write" : "read",
-            bio->bi_iter.bi_sector, bio->bi_vcnt, bio->bi_iter.bi_size);
+    //printk("stackbd: make request %-5s block %-12lu #pages %-4hu total-size "
+    //        "%-10u\n", bio_data_dir(bio) == WRITE ? "write" : "read",
+    //        bio->bi_iter.bi_sector, bio->bi_vcnt, bio->bi_iter.bi_size);
 
 //    printk("<%p> Make request %s %s %s\n", bio,
 //           bio->bi_rw & REQ_SYNC ? "SYNC" : "",
@@ -216,8 +148,7 @@ static blk_qc_t stackbd_make_request(struct request_queue *q, struct bio *bio)
     bio_list_add(&stackbd.bio_list, bio);
     wake_up(&req_event);
     spin_unlock_irq(&stackbd.lock);
-    //FIXME add a lock
-    if (logging_enabled) {
+    if (log_clients_count()) {
         log_write(current->pid, bio_data_dir(bio), bio->bi_iter.bi_sector, bio->bi_iter.bi_size);
     }
 
@@ -346,6 +277,7 @@ static struct block_device_operations stackbd_ops = {
 
 static int __init stackbd_init(void)
 {
+    int ret;
 	/* Set up our internal device */
 	spin_lock_init(&stackbd.lock);
 
@@ -380,14 +312,11 @@ static int __init stackbd_init(void)
 	add_disk(stackbd.gd);
 
   // initiate block level tracing
-  logs = kmalloc(LOG_ENTRIES_BUFFER_SIZE * sizeof(log_t), GFP_KERNEL);
-  if(!logs){
-    printk(KERN_ERR "Error allocationg log buffer");
-    goto error_after_alloc_queue;
-  }
-
-  trace_dev_major = register_chrdev(0, MY_TRACE_MODULE, &my_trace_fops);
-
+    ret = log_init(sizeof(log_t), LOG_ENTRIES_BUFFER_SIZE, "block_trace");
+    if (ret) {
+        printk("stackbd: error init trace log");
+        return ret;
+    }
     printk("stackbd: init done\n");
 
 	return 0;
@@ -411,7 +340,7 @@ static void __exit stackbd_exit(void)
         bdput(stackbd. bdev_raw);
     }
 
-    kfree(logs);
+    log_destroy();
     unregister_chrdev(trace_dev_major, MY_TRACE_MODULE);
 
 	del_gendisk(stackbd.gd);

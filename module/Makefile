@@ -1,5 +1,6 @@
 EXTRA_CFLAGS += -D_GNU_SOURCE
 obj-m := stackbd.o
+stackbd-objs := stackbd_main.o trace_log.o
 
 all:
 	make -C /usr/src/linux-headers-$(shell uname -r) SUBDIRS=$(PWD) modules
