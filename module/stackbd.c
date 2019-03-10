@@ -217,7 +217,9 @@ static blk_qc_t stackbd_make_request(struct request_queue *q, struct bio *bio)
     wake_up(&req_event);
     spin_unlock_irq(&stackbd.lock);
     //FIXME add a lock
-    log_write(current->pid, bio_data_dir(bio), bio->bi_iter.bi_sector, bio->bi_iter.bi_size);
+    if (logging_enabled) {
+        log_write(current->pid, bio_data_dir(bio), bio->bi_iter.bi_sector, bio->bi_iter.bi_size);
+    }
 
     return BLK_QC_T_NONE;
 
