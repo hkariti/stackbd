@@ -38,14 +38,14 @@ static int LOGICAL_BLOCK_SIZE = 512;
 module_param(LOGICAL_BLOCK_SIZE, int, 0);
 
 // Structure for our log entries
-typedef struct _log_t {
-  unsigned int pid;
-  int is_write; 
-  loff_t offset;
-  size_t count;
+typedef struct __attribute__((packed)) _log_t {
+  uint32_t pid;
+  uint8_t is_write;
+  int64_t offset;
+  uint64_t count;
 } log_t;
 
-static void log_write(unsigned int pid, int write, long offset, unsigned int count) {
+static void log_write(unsigned int pid, bool write, long offset, unsigned int count) {
   log_t log_entry = {
     .pid = pid,
     .is_write = write,
