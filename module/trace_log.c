@@ -99,8 +99,9 @@ static char* _logger_read(char *buffer, size_t count) {
     return buffer + count * log.entry_size;
 }
 
-static ssize_t logger_read(struct file *fd, char *buffer, size_t count, loff_t *offset) {
+static ssize_t logger_read(struct file *fd, char *buffer, size_t byte_count, loff_t *offset) {
     size_t first_read_size, second_read_size;
+    size_t count = byte_count / log.entry_size;
     size_t log_count;
     mutex_lock(&log.lock);
     log_count = log_entries_count();
@@ -115,7 +116,7 @@ static ssize_t logger_read(struct file *fd, char *buffer, size_t count, loff_t *
     buffer = _logger_read(buffer, first_read_size);
     buffer = _logger_read(buffer, second_read_size);
     mutex_unlock(&log.lock);
-    return count;
+    return count * log.entry_size;
 }
 
 static int logger_release(struct inode *in, struct file *fd) {
